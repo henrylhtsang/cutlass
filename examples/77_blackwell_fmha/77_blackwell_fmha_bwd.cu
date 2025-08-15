@@ -398,11 +398,18 @@ template<
 >
 struct BwdRunner {
 
-#ifdef FP8
-  using Element = cutlass::float_e4m3_t;
-#else
-  using Element = cutlass::half_t;
-#endif
+  #ifdef FP8
+    using Element = cutlass::float_e4m3_t;
+  #endif
+
+  #ifdef BFLOAT16
+    using Element = cutlass::bfloat16_t;
+  #endif
+
+  #ifdef FP16
+    using Element = cutlass::half_t;
+  #endif
+
   using ElementAccumulator = float;
 
   // Q K D (H B)
