@@ -107,7 +107,7 @@ set(TEST_MLA_FUSE_REDUCTION --b=1 --k=4096 --split_kv=8 --page=128 --fuse_reduct
 
 if(NOT WIN32 AND (NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang")) AND (CUTLASS_NVCC_ARCHS MATCHES 100a))
 
-  foreach(PREC fp8 fp16)
+  foreach(PREC fp8 fp16 bfloat16)
     string(TOUPPER "${PREC}" PREC_MACRO)
 
     cutlass_example_add_executable(
@@ -143,7 +143,7 @@ if(NOT WIN32 AND (NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang")) AND (CUTLASS_NVCC
         )
     target_include_directories(77_blackwell_fmha_${PREC} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(77_blackwell_fmha_${PREC} PRIVATE ${PREC_MACRO})
-  
+
     cutlass_example_add_executable(
         77_blackwell_fmha_gen_${PREC}
         77_blackwell_fmha_gen.cu
@@ -252,15 +252,21 @@ if(NOT WIN32 AND (NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang")) AND (CUTLASS_NVCC
     DEPENDS
       77_blackwell_fmha_fp8
       77_blackwell_fmha_fp16
+      77_blackwell_fmha_bf16
       77_blackwell_fmha_gen_fp8
       77_blackwell_fmha_gen_fp16
+      77_blackwell_fmha_gen_bf16
       77_blackwell_mla_2sm_fp8
       77_blackwell_mla_2sm_fp16
+      77_blackwell_mla_2sm_bf16
       77_blackwell_mla_2sm_cpasync_fp8
       77_blackwell_mla_2sm_cpasync_fp16
+      77_blackwell_mla_2sm_cpasync_bf16
       77_blackwell_fmha_bwd_fp8
       77_blackwell_fmha_bwd_fp16
+      77_blackwell_fmha_bwd_bf16
       77_blackwell_mla_fwd_fp8
       77_blackwell_mla_fwd_fp16
+      77_blackwell_mla_fwd_bf16
   )
 endif()
