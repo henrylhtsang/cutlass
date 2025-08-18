@@ -125,6 +125,11 @@ struct Options {
   bool verify = false;
   bool verbose = false;
 
+  // TODO: hack to true
+  int window_size_left = 3;
+  int window_size_right = 3;
+  bool local = true;
+
   bool causal = false;
   bool causal_q_begin = true;
   bool residual = false;
@@ -261,21 +266,26 @@ struct Options {
     cmd.get_cmd_line_argument("iterations", iterations, defaults.iterations);
     cmd.get_cmd_line_argument("tensor_ring_buffers", tensor_ring_buffers, defaults.tensor_ring_buffers);
 
+    cmd.get_cmd_line_argument("window_size_left", window_size_left, defaults.window_size_left);
+    cmd.get_cmd_line_argument("window_size_right", window_size_right, defaults.window_size_right);
+
     verify = cmd.check_cmd_line_flag("verify");
     verbose = cmd.check_cmd_line_flag("verbose");
     persistent = cmd.check_cmd_line_flag("persistent");
 
+    // TODO(henrylhtsang): figure out how to get multiple mask working
     std::string mask;
     cmd.get_cmd_line_argument<std::string>("mask", mask, "");
     std::string causal_type;
     cmd.get_cmd_line_argument<std::string>("causal-type", causal_type, "");
     if (mask == "no" || mask == "") {
-      causal = residual = false;
+      local = causal = residual = false;
       if (varlen) {
         residual = true;
       }
     }
     else if (mask == "causal") {
+      local = false;
       residual = false;
       causal = true;
       if(causal_type == "qend") {
@@ -285,9 +295,16 @@ struct Options {
       }
     }
     else if (mask == "residual") {
+      local = false;
       residual = true;
       causal = false;
     }
+    else if (mask == "local") {
+      local = true;
+      residual = false;
+      causal = false;
+    }
+
     cmd.get_cmd_line_argument("sm-count", sm_count, defaults.sm_count);
     get_init_style_argument(cmd, "init-style", init_style_q, defaults.init_style_q);
     get_init_style_argument(cmd, "init-style", init_style_k, defaults.init_style_q);
@@ -423,7 +440,7 @@ struct FwdRunner {
 
   using ElementAccumulatorQK = float;
   using ElementAccumulatorPV = float;
-#ifdef BFLOAT16
+  #ifdef BFLOAT16
     using ElementOut = cutlass::bfloat16_t;
   #else
     using ElementOut = cutlass::half_t;
@@ -433,7 +450,7 @@ struct FwdRunner {
   using ProblemShapeRegular = cute::tuple<int, int, int, cute::tuple<cute::tuple<int, int>, int>>;
   using ProblemShapeVarlen = cute::tuple<VariableLength, VariableLength, int, cute::tuple<cute::tuple<int, int>, int>>;
   using ProblemShapeType = std::conditional_t<kIsVarlen, ProblemShapeVarlen, ProblemShapeRegular>;
-  
+
   using StrideQ = cute::tuple<int, _1, cute::tuple<cute::tuple<int, int>, int>>;  // Q D (H_G H_R B)
   using StrideK = cute::tuple<int, _1, cute::tuple<cute::tuple<_0, int>, int>>;  // K D (H_G H_R B)
   using StrideV = StrideK;
@@ -443,7 +460,7 @@ struct FwdRunner {
   static constexpr bool kIsPersistent = find_option_t<Tag::kIsPersistent, true_type, KernelOptions...>::value;
   using TileScheduler = std::conditional_t<kIsPersistent, cutlass::fmha::kernel::PersistentTileScheduler, cutlass::fmha::kernel::IndividualTileScheduler>;
 
-  using Mainloop = 
+  using Mainloop =
     cutlass::fmha::collective::Sm100FmhaFwdMainloopTmaWarpspecialized<
       Element, ElementAccumulatorQK, ElementAccumulatorPV,
       TileShape, StrideQ, StrideK, StrideV,
@@ -524,7 +541,7 @@ struct FwdRunner {
     Tensor mLSE = make_tensor(make_gmem_ptr(buffer.block_ref_LSE.get()),
       select<0,3>(problem_shape),
       stride_LSE);
-    
+
     auto [Q, K, D, HB] = problem_shape;
 
     auto problem_shape_ref = cute::make_tuple(Q, K, D, D, HB);
@@ -548,7 +565,7 @@ struct FwdRunner {
 
     bool passed_O = (max_diff < kMaxDiffThresh) && (mean_diff < kMeanDiffThresh);
     if (! passed_O) {
-      std::cerr << "failed O: max diff " << max_diff 
+      std::cerr << "failed O: max diff " << max_diff
                 << " mean " << mean_diff << std::endl;
     }
 
@@ -556,7 +573,7 @@ struct FwdRunner {
 
     bool passed_LSE = (max_diff < kMaxDiffThresh) && (mean_diff < kMeanDiffThresh);
     if ( ! passed_LSE) {
-      std::cerr << "failed LSE: max diff " << max_diff 
+      std::cerr << "failed LSE: max diff " << max_diff
                 << " mean " << mean_diff << std::endl;
     }
 
@@ -572,7 +589,7 @@ struct FwdRunner {
 
     // generate Q as --b times
     //    gaussian (--Q, --Q / 2) sampled positive
-    //    track cumulative 
+    //    track cumulative
     std::mt19937 rng(0x202305151552ull);
     std::normal_distribution<double> dist_q(get<0>(problem_size), get<0>(problem_size) / 2);
     std::normal_distribution<double> dist_kv(get<1>(problem_size), get<1>(problem_size) / 2);
@@ -595,7 +612,7 @@ struct FwdRunner {
     int max_seqlen_kv = 0;
 
     for (int i = 0; i < num_batches; i++) {
-      int seqlen_q = (! options.varlen_q.empty()) ? options.varlen_q.at(i) : 
+      int seqlen_q = (! options.varlen_q.empty()) ? options.varlen_q.at(i) :
               kVarlenSame ? get<0>(problem_size) :
               generate_positive_int(dist_q, rng);
       int seqlen_kv = (! options.varlen_k.empty()) ? options.varlen_k.at(i) :
@@ -636,7 +653,7 @@ struct FwdRunner {
     int h_r = options.h / options.h_k;
     assert(options.h % options.h_k == 0);
     auto problem_shape_in = cute::make_tuple(options.q, options.k, options.d, cute::make_tuple(cute::make_tuple(h_r, options.h_k), options.b));
-    
+
     ProblemShapeType problem_shape;
     decltype(problem_shape_in) problem_size;
 
@@ -700,7 +717,7 @@ struct FwdRunner {
         buffer.device_cumulative_seqlen_kv.reset(cumulative_seqlen_kv.size());
         buffer.device_cumulative_seqlen_kv.copy_from_host(
           cumulative_seqlen_kv.data(), cumulative_seqlen_kv.size());
-      }   
+      }
     };
 
     buffers.push_back(std::make_unique<DeviceBuffer>());
@@ -945,7 +962,7 @@ void run_fwd_128(Mask fusion, Options const & options, cutlass::KernelHardwareIn
       auto result = runner.run(options, hw_info);
       print_result(name, result, options.verbose);
     }
-    else 
+    else
     {
       FwdRunner<false, decltype(shape), void, Mask, decltype(kernel_options)...> runner;
       auto result = runner.run(options, hw_info);
@@ -978,7 +995,7 @@ void run_fwd_64(Mask fusion, Options const & options, cutlass::KernelHardwareInf
       auto result = runner.run(options, hw_info);
       print_result(name, result, options.verbose);
     }
-    else 
+    else
     {
       FwdRunner<false, decltype(shape), void, Mask, decltype(kernel_options)...> runner;
       auto result = runner.run(options, hw_info);
@@ -1093,6 +1110,7 @@ int main_single(int argc, char const **args) {
 
   std::cout << "###### B " << options.b << " H " << options.h << " H_K " << options.h_k << " Q " << options.q << " K " << options.k << " D " << options.d << " ";
   std::cout << "Forward" << " " << (options.causal ? "Causal" : (options.residual ? "Residual" : "None")) << " ";
+  std::cout << (options.local ? ("Local with window size " + std::to_string(options.window_size_left) + " " + std::to_string(options.window_size_right)) : "Not local") << " ";
   std::cout << "#SM " << hw_info.sm_count << std::endl;
 
   auto with_mask = [&](auto fn) {
@@ -1105,6 +1123,9 @@ int main_single(int argc, char const **args) {
     }
     else if (options.residual) {
       fn(ResidualMask{});
+    }
+    else if (options.local) {
+      fn(CausalMask{});
     }
     else {
       fn(NoMask{});
