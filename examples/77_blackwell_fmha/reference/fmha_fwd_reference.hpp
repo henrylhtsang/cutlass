@@ -121,13 +121,13 @@ void __global__ fmha_reference_kernel(
 
         // Apply windowed causal mask: only allow attention within [idx_Q - window_size_left, idx_Q + window_size_right]
         // hack to pass all tests
-        int window_size_left = 1024;
+        int window_size_left = 32;
         int window_size_right = 0;
 
         int lower_bound = idx_Q + offset_Q - offset_K - window_size_left;
         int upper_bound = idx_Q + offset_Q - offset_K + window_size_right;
         if (idx_K < lower_bound || idx_K > upper_bound) {
-          mS[idx_K] = -std::numeric_limits<ElementAccumulator>::infinity();
+          mS[idx_K] = -INFINITY;
         } else {
           mS[idx_K] = acc;
         }

@@ -165,7 +165,13 @@ struct Sm100FmhaLoadTmaWarpspecialized {
     BlkCoord blk_coord_q = blk_coord_in;
     BlkCoord blk_coord_kv = blk_coord_in;
 
-    int mask_tile_count = Mask{}.get_trip_count(blk_coord_in, TileShape{}, problem_shape);
+    // int mask_tile_count = Mask{}.get_trip_count(blk_coord_in, TileShape{}, problem_shape);
+
+    auto min_max = Mask{}.get_n_block_min_max(blk_coord_in, TileShape{}, problem_shape);
+    int n_block_min = get<0>(min_max);
+    int n_block_max = get<1>(min_max);
+
+    // printf("in load\n");
 
     using X = Underscore;
 
@@ -199,7 +205,7 @@ struct Sm100FmhaLoadTmaWarpspecialized {
     Tensor tSgQ_qdl = mma_qk.partition_A(gQ_qdl);
     Tensor sQ = make_tensor(make_smem_ptr(storage.smem_q.data()), SmemLayoutQ{});
     auto [tQgQ_qdl, tQsQ] = tma_partition(
-      params.tma_load_q, _0{}, make_layout(_1{}), 
+      params.tma_load_q, _0{}, make_layout(_1{}),
       group_modes<0,3>(sQ), group_modes<0,3>(tSgQ_qdl)
     );
     Tensor tQgQ = tQgQ_qdl(_, _, _0{}, get<2>(blk_coord_q));
@@ -264,7 +270,7 @@ struct Sm100FmhaLoadTmaWarpspecialized {
     ++pipeline_q_producer_state;
 
     // K1
-    int k_index = 0;
+    int k_index = n_block_min;
     pipeline_kv.producer_acquire(pipeline_kv_producer_state);
     if (lane_predicate) {
       auto tma_barrier = pipeline_kv.producer_get_barrier(pipeline_kv_producer_state);
@@ -290,8 +296,8 @@ struct Sm100FmhaLoadTmaWarpspecialized {
     k_index += 1;
 
     // loop:
-    mask_tile_count -= 1;
-    for (; mask_tile_count > 0; mask_tile_count -= 1) {
+    // mask_tile_count -= 1;
+    for (; k_index < n_block_max; k_index += 1) {
 
       // Ki
       pipeline_kv.producer_acquire(pipeline_kv_producer_state);
@@ -308,7 +314,7 @@ struct Sm100FmhaLoadTmaWarpspecialized {
         copy(params.tma_load_v.with(*tma_barrier, 0), tVgV(_, k_index), tVsV(_, pipeline_kv_producer_state.index()));
       }
       ++pipeline_kv_producer_state;
-      k_index += 1;
+      // k_index += 1;
     }
   }
 };

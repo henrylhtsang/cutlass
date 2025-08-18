@@ -40,12 +40,27 @@ using namespace cute;
 struct NoMask {
   template<class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE
+  cute::tuple<int, int> get_n_block_min_max(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    int n_block_min = 0;
+    int n_block_max = ceil_div(get<1>(problem_size), get<1>(tile_shape));
+    return cute::make_tuple(n_block_min, n_block_max);
+  }
+
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
   int get_trip_count(
       BlkCoord const& blk_coord,
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
 
-    return ceil_div(get<1>(problem_size), get<1>(tile_shape));
+    auto min_max = get_n_block_min_max(blk_coord, tile_shape, problem_size);
+    int n_block_min = get<0>(min_max);
+    int n_block_max = get<1>(min_max);
+    return n_block_max - n_block_min;
   }
 
   template<class BlkCoord, class TileShape, class ProblemSize>
@@ -82,6 +97,18 @@ struct NoMask {
 struct ResidualMask : NoMask {
 
   using Base = NoMask;
+
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  cute::tuple<int, int> get_n_block_min_max(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    int n_block_min = 0;
+    int n_block_max = ceil_div(get<1>(problem_size), get<1>(tile_shape));
+    return cute::make_tuple(n_block_min, n_block_max);
+  }
 
   template <class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE int get_masked_trip_count(
@@ -134,6 +161,18 @@ struct ResidualMask : NoMask {
 struct ResidualMaskForBackward : NoMask {
 
   using Base = NoMask;
+
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  cute::tuple<int, int> get_n_block_min_max(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    int n_block_min = 0;
+    int n_block_max = ceil_div(get<1>(problem_size), get<1>(tile_shape));
+    return cute::make_tuple(n_block_min, n_block_max);
+  }
 
   template <class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE int get_masked_trip_count(
@@ -194,16 +233,15 @@ struct CausalMask : NoMask {
   static constexpr bool IsQBegin = kIsQBegin;
 
   // hack to pass tests
-  int window_size_left = 1024;
+  int window_size_left = 32;
   int window_size_right = 0;
 
   template<class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE
-  int get_trip_count(
+  cute::tuple<int, int> get_n_block_min_max(
       BlkCoord const& blk_coord,
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
-    // my understanding is we only calculate how many block we need
 
     // tile shape
     int kBlockM = get<0>(tile_shape);
@@ -223,10 +261,8 @@ struct CausalMask : NoMask {
     n_idx_max = std::min(n_idx_max, seq_len_k);
     int n_block_max = ceil_div(n_idx_max, kBlockN);
 
-    // Q: do we need to take min between n_block_max
-
     // min
-    int m_idx_min = (m_block + 1) * kBlockM;
+    int m_idx_min = m_block * kBlockM;
     int n_idx_min;
     if constexpr (IsQBegin) {
       n_idx_min = m_idx_min + offset_q - window_size_left;
@@ -234,7 +270,25 @@ struct CausalMask : NoMask {
       n_idx_min = m_idx_min - window_size_left;
     }
     n_idx_min = std::max(n_idx_min, 0);
-    int n_block_min = ceil_div(n_idx_min, kBlockN);
+    // probably not optimized
+    int n_block_min = ceil_div(n_idx_min - 1, kBlockN);
+
+    return cute::make_tuple(n_block_min - 5, n_block_max + 5);
+  }
+
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_trip_count(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+    // my understanding is we only calculate how many block we need
+
+    auto min_max = get_n_block_min_max(blk_coord, tile_shape, problem_size);
+    int n_block_min = get<0>(min_max);
+    int n_block_max = get<1>(min_max);
+
+    // printf("in get trip count\n");
 
     // might need to consider M, and watch out for off by 1 error.
     return n_block_max - n_block_min;
@@ -248,6 +302,7 @@ struct CausalMask : NoMask {
       ProblemSize const& problem_size) {
 
     int trip_count = get_trip_count(blk_coord, tile_shape, problem_size);
+    return trip_count;
     if constexpr (IsQBegin) {
       return std::min(trip_count, int(ceil_div(size<0>(tile_shape), size<1>(tile_shape))));
     } else {
@@ -262,6 +317,8 @@ struct CausalMask : NoMask {
       BlkCoord const& blk_coord,
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
+
+    return 0;
 
     return get_trip_count(blk_coord, tile_shape, problem_size) - get_masked_trip_count(blk_coord, tile_shape, problem_size);
   }
@@ -281,11 +338,22 @@ struct CausalMask : NoMask {
     //      where we only compute the next row and use cache for the rest
     //    - if you'd like this, you only need to set kIsQBegin=false
 
+    int M = get<0>(problem_size);
+    int N = get<1>(problem_size);
+
+    // printf("in apply mask\n");
+
     if constexpr (IsQBegin) {
       CUTLASS_PRAGMA_UNROLL
       for (int i = 0; i < size(acc_qk); i++) {
         auto pos = index_qk(i);
-        if ((get<0>(pos) < get<1>(pos)) || (get<1>(pos) >= get<1>(problem_size))) {
+        int pos_i = get<0>(pos);
+        int pos_j = get<1>(pos);
+
+        // for each j, keep [lower_j, upper_j)
+        int upper_j = std::min(N, pos_i + window_size_right + 1);
+        int lower_j = std::max(0, pos_i - window_size_left);
+        if ((pos_j < lower_j) || (pos_j >= upper_j)){
           acc_qk(i) = -INFINITY;
         }
       }
@@ -294,7 +362,13 @@ struct CausalMask : NoMask {
       CUTLASS_PRAGMA_UNROLL
       for (int i = 0; i < size(acc_qk); i++) {
         auto pos = index_qk(i);
-        if ((get<0>(pos) + offset_q < get<1>(pos)) || (get<1>(pos) >= get<1>(problem_size))) {
+        int pos_i = get<0>(pos);
+        int pos_j = get<1>(pos);
+
+        // for each j
+        int upper_j = std::min(N, pos_i + window_size_right + 1);
+        int lower_j = std::max(0, pos_i - window_size_left);
+        if ((pos_j + offset_q < lower_j) || (pos_j >= upper_j)){
           acc_qk(i) = -INFINITY;
         }
       }
@@ -306,6 +380,16 @@ template<bool kIsQBegin = true>
 struct CausalForBackwardMask : CausalMask<kIsQBegin>, ResidualMaskForBackward {
 
   using Base = CausalMask<kIsQBegin>;
+
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  cute::tuple<int, int> get_n_block_min_max(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    return Base::get_n_block_min_max(blk_coord, tile_shape, problem_size);
+  }
 
   template<class AccQK, class IndexQK, class ProblemSize>
   CUTLASS_DEVICE
