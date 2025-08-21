@@ -38,6 +38,9 @@ namespace cutlass::fmha::collective {
 using namespace cute;
 
 struct NoMask {
+  CUTLASS_DEVICE
+  NoMask(int left = -1, int right = -1) {}
+
   template<class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE
   cute::tuple<int, int> get_n_block_min_max(
@@ -97,6 +100,9 @@ struct NoMask {
 struct ResidualMask : NoMask {
 
   using Base = NoMask;
+
+  CUTLASS_DEVICE
+  ResidualMask(int left = -1, int right = -1) : NoMask(left, right) {}
 
   template<class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE
@@ -232,9 +238,12 @@ struct CausalMask : NoMask {
 
   static constexpr bool IsQBegin = kIsQBegin;
 
-  // hack to pass tests
-  int window_size_left = 32;
-  int window_size_right = 0;
+  int window_size_left;
+  int window_size_right;
+
+  CUTLASS_DEVICE
+  CausalMask(int left = -1, int right = -1)
+      : window_size_left(left), window_size_right(right) {}
 
   template<class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE
@@ -254,9 +263,9 @@ struct CausalMask : NoMask {
     int offset_q = get<1>(problem_size) - get<0>(problem_size);
     int n_idx_max;
     if constexpr (IsQBegin) {
-      n_idx_max = m_idx_max + offset_q + window_size_right;
-    } else {
       n_idx_max = m_idx_max + window_size_right;
+    } else {
+      n_idx_max = m_idx_max + offset_q + window_size_right;
     }
     n_idx_max = std::min(n_idx_max, seq_len_k);
     int n_block_max = ceil_div(n_idx_max, kBlockN);
@@ -265,15 +274,14 @@ struct CausalMask : NoMask {
     int m_idx_min = m_block * kBlockM;
     int n_idx_min;
     if constexpr (IsQBegin) {
-      n_idx_min = m_idx_min + offset_q - window_size_left;
-    } else {
       n_idx_min = m_idx_min - window_size_left;
+    } else {
+      n_idx_min = m_idx_min + offset_q - window_size_left;
     }
     n_idx_min = std::max(n_idx_min, 0);
-    // probably not optimized
-    int n_block_min = ceil_div(n_idx_min - 1, kBlockN);
+    int n_block_min = n_idx_min / kBlockN;
 
-    return cute::make_tuple(n_block_min - 5, n_block_max + 5);
+    return cute::make_tuple(n_block_min, n_block_max);
   }
 
   template<class BlkCoord, class TileShape, class ProblemSize>
@@ -354,8 +362,12 @@ struct CausalMask : NoMask {
         int upper_j = std::min(N, pos_i + window_size_right + 1);
         int lower_j = std::max(0, pos_i - window_size_left);
         if ((pos_j < lower_j) || (pos_j >= upper_j)){
+          // printf("apply mask at (%d, %d)\n", pos_i, pos_j);
           acc_qk(i) = -INFINITY;
         }
+        //  else {
+        //   printf("not apply mask at (%d, %d)\n", pos_i, pos_j);
+        // }
       }
     } else {
       const auto offset_q = get<1>(problem_size) - get<0>(problem_size);

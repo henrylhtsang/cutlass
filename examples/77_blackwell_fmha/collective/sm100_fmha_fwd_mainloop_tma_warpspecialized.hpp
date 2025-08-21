@@ -78,7 +78,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
 
   using StagesQ = cutlass::gemm::collective::StageCount<StageCountQ>;
   using StagesKV = cutlass::gemm::collective::StageCount<StageCountKV>;
-  
+
   using ClusterShape = Shape<_1, _1, _1>;
 
   static const int Alignment = 128 / sizeof_bits_v<Element>;
@@ -197,6 +197,9 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
 
     // scaling factor to quantize O
     float inv_scale_o = 1.0f;
+
+    int window_size_left = -1;
+    int window_size_right = -1;
   };
 
   struct Params {
@@ -206,6 +209,9 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     float scale_softmax_log2;
 
     float scale_output;
+
+    int window_size_left;
+    int window_size_right;
   };
 
   template<class ProblemShape>
@@ -226,10 +232,12 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     float log2_e = static_cast<float>(std::log2(std::exp(1.0)));
 
     return Params{
-        Load::to_underlying_arguments(problem_shape, args.load, workspace),
-        args.scale_q * args.scale_k * scale_softmax,
-        args.scale_q * args.scale_k * log2_e * scale_softmax,
-        args.scale_v * args.inv_scale_o
+        Load::to_underlying_arguments(problem_shape, args.load, workspace), /*load*/
+        args.scale_q * args.scale_k * scale_softmax,                         /*scale_softmax*/
+        args.scale_q * args.scale_k * log2_e * scale_softmax,                /*scale_softmax_log2*/
+        args.scale_v * args.inv_scale_o,                                      /*scale_output*/
+        args.window_size_left,                                                /*window_size_left*/
+        args.window_size_right                                                /*window_size_right*/
     };
   }
 
@@ -251,7 +259,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     load.load(blk_coord, problem_shape, params.load, params_problem_shape,
         storage,
         pipeline_q, pipeline_q_producer_state,
-        pipeline_kv, pipeline_kv_producer_state);
+        pipeline_kv, pipeline_kv_producer_state, params.window_size_left, params.window_size_right);
   }
 
   template<class BlkCoord, class ProblemShape>
@@ -269,7 +277,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     auto pipeline_q_release_state = pipeline_q_consumer_state;
     auto pipeline_kv_release_state = pipeline_kv_consumer_state;
 
-    int mask_tile_count = Mask{}.get_trip_count(blk_coord, TileShape{}, problem_shape);
+    int mask_tile_count = Mask(params.window_size_left, params.window_size_right).get_trip_count(blk_coord, TileShape{}, problem_shape);
 
     typename CollectiveMmaQK::TiledMma mma_qk;
     ThrMMA thr_mma_qk = mma_qk.get_slice(0);
@@ -569,7 +577,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     copy(tiled_tmem_load, tTMEM_LOADtS, tTMEM_LOADrS);
 
     if constexpr (need_apply_mask) {
-      Mask{}.apply_mask(tTMEM_LOADrS, tTMEM_LOADcS, problem_shape);
+      Mask(params.window_size_left, params.window_size_right).apply_mask(tTMEM_LOADrS, tTMEM_LOADcS, problem_shape);
     }
 
     ElementQK old_row_max = row_max;
@@ -591,6 +599,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
       row_max = ::fmax(row_max, row_max_3);
     }
 
+    // printf("row_max: %f\n", row_max);
     ElementQK row_max_safe = row_max == -INFINITY ? 0 : row_max;
 
     Tensor tTMEM_STOREVrS = make_tensor<ElementQK>(shape(tTMEM_STOREVcS));
@@ -720,7 +729,11 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
       PipelineC& pipeline_c, typename PipelineC::PipelineState& pipeline_c_producer_state,
       OrderBarrierSoftmax& order_s) {
 
-    int mask_tile_count = Mask{}.get_unmasked_trip_count(blk_coord, TileShape{}, problem_shape);
+    int mask_tile_count = Mask(params.window_size_left, params.window_size_right).get_unmasked_trip_count(blk_coord, TileShape{}, problem_shape);
+
+    auto min_max = Mask(params.window_size_left, params.window_size_right).get_n_block_min_max(blk_coord, TileShape{}, problem_shape);
+    int n_block_min = get<0>(min_max);
+    int n_block_max = get<1>(min_max);
 
     ElementQK row_max = -INFINITY;
     ElementQK row_sum = 0;
@@ -728,7 +741,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     Tensor cS_base = make_identity_tensor(select<0,1>(TileShapeQK{}));
     auto logical_offset = make_coord(
         get<0>(blk_coord) * get<0>(TileShape{}) + (stage % get<0>(ThreadShape{})) * get<0>(TileShapeQK{}),
-        0 + (stage % get<1>(ThreadShape{})) * get<1>(TileShapeQK{})
+        0 + (stage % get<1>(ThreadShape{})) * get<1>(TileShapeQK{}) + n_block_min * get<1>(TileShape{})
     );
     Tensor cS = domain_offset(logical_offset, cS_base);
 
@@ -739,7 +752,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
       softmax_step<false /* need_apply_mask */>(
           row_max, row_sum, stage,
           (mask_tile_count == 1) &&
-              (Mask{}.get_masked_trip_count(blk_coord, TileShape{}, problem_shape) == 0),
+              (Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape) == 0),
           blk_coord, cS, params, problem_shape,
           pipeline_s, pipeline_s_consumer_state,
           pipeline_c, pipeline_c_producer_state,
@@ -750,7 +763,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     }
 
     // Masked iterations
-    mask_tile_count = Mask{}.get_masked_trip_count(blk_coord, TileShape{}, problem_shape);
+    mask_tile_count = Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape);
 
     CUTLASS_PRAGMA_NO_UNROLL
     for (; mask_tile_count > 0; mask_tile_count -= 1) {
@@ -963,7 +976,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
       PipelineE& pipeline_epi, typename PipelineE::PipelineState& pipeline_epi_producer_state,
       CollectiveEpilogue& epilogue) {
 
-    int mask_tile_count = Mask{}.get_trip_count(blk_coord, TileShape{}, problem_shape);
+    int mask_tile_count = Mask(params.window_size_left, params.window_size_right).get_trip_count(blk_coord, TileShape{}, problem_shape);
 
     int thread_idx = threadIdx.x % (4 * cutlass::NumThreadsPerWarp);
 
@@ -1071,7 +1084,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     //    store to smem
     Tensor sO = make_tensor(make_smem_ptr(shared_storage_epi.smem_o.data()), typename TensorStorageEpi::SmemLayoutO{});
     Tensor gLSE = make_tensor(make_gmem_ptr(epilogue.params.ptr_LSE), select<0,3>(problem_shape), epilogue.params.dLSE);
-    
+
     correction_epilogue(params.scale_output / tTMEM_LOADVrS(kIdxFinalRowSum), _0{}, sO);
 
     if (epilogue.params.ptr_LSE != nullptr) {
@@ -1171,10 +1184,10 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     auto tOgO = thr_copy.partition_D(sO);
     auto tOrO = make_tensor<ElementOut>(shape(tOgO(_,_,_,_0{})));
     clear(tOrO);
-    
+
     copy(tiled_copy, tOrO, tOgO(_,_,_,_0{}));
 #endif
-    
+
     if (epilogue.params.ptr_LSE != nullptr) {
       int row_idx = thread_idx + get<0>(TileShape{}) * get<0>(blk_coord);
 

@@ -48,7 +48,9 @@ void __global__ fmha_reference_kernel(
     ProblemShapeIn problem_shape_in,
     TensorQ mQ, TensorK mK, TensorV mV,
     TensorO mO, TensorLSE mLSE,
-    Mask mask) {
+    Mask mask,
+    int window_size_left = -1,
+    int window_size_right = -1) {
 
   using namespace cute;
   using namespace cutlass::fmha::collective;
@@ -120,14 +122,10 @@ void __global__ fmha_reference_kernel(
         }
 
         // Apply windowed causal mask: only allow attention within [idx_Q - window_size_left, idx_Q + window_size_right]
-        // hack to pass all tests
-        int window_size_left = 32;
-        int window_size_right = 0;
-
-        int lower_bound = idx_Q + offset_Q - offset_K - window_size_left;
-        int upper_bound = idx_Q + offset_Q - offset_K + window_size_right;
+        int lower_bound = idx_Q - window_size_left;
+        int upper_bound = idx_Q + window_size_right;
         if (idx_K < lower_bound || idx_K > upper_bound) {
-          mS[idx_K] = -INFINITY;
+          mS[idx_K] = -std::numeric_limits<ElementAccumulator>::infinity();
         } else {
           mS[idx_K] = acc;
         }
@@ -191,14 +189,16 @@ void fmha_reference(
     ProblemShapeIn problem_shape_in,
     TensorQ mQ, TensorK mK, TensorV mV,
     TensorO mO, TensorLSE mLSE,
-    Mask mask) {
+    Mask mask,
+    int window_size_left = -1,
+    int window_size_right = -1) {
 
   using namespace cute;
 
   dim3 grid(size<0>(mO), size<2>(mO), 1);
   dim3 block(256);
   int shared_mem = size<0>(mK) * int(sizeof(typename TensorLSE::value_type));
-  fmha_reference_kernel<<<grid, block, shared_mem>>>(problem_shape_in, mQ, mK, mV, mO, mLSE, mask);
+  fmha_reference_kernel<<<grid, block, shared_mem>>>(problem_shape_in, mQ, mK, mV, mO, mLSE, mask, window_size_left, window_size_right);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
