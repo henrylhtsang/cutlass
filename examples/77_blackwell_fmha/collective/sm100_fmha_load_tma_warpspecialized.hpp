@@ -160,12 +160,12 @@ struct Sm100FmhaLoadTmaWarpspecialized {
       Params const& params, ParamsProblemShape const& params_problem_shape,
       TensorStorage& storage,
       PipelineQ& pipeline_q, typename PipelineQ::PipelineState& pipeline_q_producer_state,
-      PipelineKV& pipeline_kv, typename PipelineKV::PipelineState& pipeline_kv_producer_state) {
+      PipelineKV& pipeline_kv, typename PipelineKV::PipelineState& pipeline_kv_producer_state, const int window_size_left, const int window_size_right) {
 
     BlkCoord blk_coord_q = blk_coord_in;
     BlkCoord blk_coord_kv = blk_coord_in;
 
-    auto min_max = Mask{}.get_n_block_min_max(blk_coord_in, TileShape{}, problem_shape);
+    auto min_max = Mask(window_size_left, window_size_right).get_n_block_min_max(blk_coord_in, TileShape{}, problem_shape);
     int n_block_min = get<0>(min_max);
     int n_block_max = get<1>(min_max);
 
@@ -201,7 +201,7 @@ struct Sm100FmhaLoadTmaWarpspecialized {
     Tensor tSgQ_qdl = mma_qk.partition_A(gQ_qdl);
     Tensor sQ = make_tensor(make_smem_ptr(storage.smem_q.data()), SmemLayoutQ{});
     auto [tQgQ_qdl, tQsQ] = tma_partition(
-      params.tma_load_q, _0{}, make_layout(_1{}), 
+      params.tma_load_q, _0{}, make_layout(_1{}),
       group_modes<0,3>(sQ), group_modes<0,3>(tSgQ_qdl)
     );
     Tensor tQgQ = tQgQ_qdl(_, _, _0{}, get<2>(blk_coord_q));

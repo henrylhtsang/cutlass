@@ -99,7 +99,6 @@ struct NoMask {
 };
 
 struct ResidualMask : NoMask {
-
   using Base = NoMask;
 
   CUTLASS_DEVICE
@@ -224,6 +223,9 @@ template<bool kIsQBegin = true>
 struct CausalMask : NoMask {
 
   using Base = NoMask;
+
+  CUTLASS_DEVICE
+  CausalMask(int left = -1, int right = -1) : NoMask(left, right) {}
 
   static constexpr bool IsQBegin = kIsQBegin;
 
@@ -402,7 +404,7 @@ struct LocalMask : NoMask {
     }
     n_idx_max = std::min(n_idx_max, seq_len_k);
     // TODO: check for off by one error
-    int n_block_max = ceil_div(n_idx_max, kBlockN);
+    int n_block_max = ceil_div(n_idx_max, kBlockN); // maybe + 1?
 
     // min
     int m_idx_min = m_block * kBlockM;

@@ -40,6 +40,14 @@ set_property(
 
 set(TEST_BASIC --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=no)
 set(TEST_CAUSAL --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=causal)
+
+set(TEST_LOCAL --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=local --window_size_right=32 --window_size_left=32)
+set(TEST_LOCAL_01 --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=local --window_size_right=128 --window_size_left=128)
+set(TEST_LOCAL_02 --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=local --window_size_right=512 --window_size_left=512)
+set(TEST_LOCAL_03 --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=local --window_size_right=0 --window_size_left=0)
+set(TEST_LOCAL_04 --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=local --window_size_right=32 --window_size_left=0)
+set(TEST_LOCAL_05 --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=local --window_size_right=0 --window_size_left=32)
+
 set(TEST_VARLEN --b=1 --h=4 --q=512 --k=512 --d=128 --verify --mask=residual --varlen)
 set(TEST_HDIM64 --b=2 --h=4 --q=512 --k=512 --d=64 --verify)
 set(TEST_GQA --b=2 --h=4 --h_k=2 --q=512 --k=512 --d=64 --verify)
@@ -116,6 +124,12 @@ if(NOT WIN32 AND (NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang")) AND (CUTLASS_NVCC
         TEST_COMMAND_OPTIONS
         TEST_BASIC
         TEST_CAUSAL
+        TEST_LOCAL
+        TEST_LOCAL_01
+        TEST_LOCAL_02
+        TEST_LOCAL_03
+        TEST_LOCAL_04
+        TEST_LOCAL_05
         TEST_VARLEN
         TEST_HDIM64
         TEST_GQA
@@ -217,6 +231,12 @@ if(NOT WIN32 AND (NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang")) AND (CUTLASS_NVCC
         TEST_COMMAND_OPTIONS
         TEST_BASIC
         TEST_CAUSAL
+        TEST_LOCAL
+        TEST_LOCAL_01
+        TEST_LOCAL_02
+        TEST_LOCAL_03
+        TEST_LOCAL_04
+        TEST_LOCAL_05
         TEST_VARLEN
         TEST_HDIM64
         TEST_GQA

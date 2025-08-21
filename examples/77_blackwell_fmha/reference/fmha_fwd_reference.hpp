@@ -65,7 +65,7 @@ void __global__ fmha_reference_kernel(
 
   for (int idx_L = blockIdx.y; idx_L < size<4>(problem_shape_in); idx_L += gridDim.y) {
     for (int idx_Q = blockIdx.x; idx_Q < size<0>(problem_shape_in); idx_Q += gridDim.x) {
-      
+
       auto coord_L = idx2crd(idx_L, shape<4>(problem_shape_in));
       auto get_coord_in = [&]() {
         if constexpr (rank_v<decltype(get<2>(ProblemShapeIn{}))> == 2) {
@@ -94,7 +94,7 @@ void __global__ fmha_reference_kernel(
       if constexpr (rank<0>(decltype(coord){}) == 2) {
         offset_Q = get<0,1>(coord);
       }
-  
+
       int offset_K = 0;
       if constexpr (rank<1>(decltype(coord){}) == 2) {
         offset_K = get<1,1>(coord);
@@ -110,7 +110,7 @@ void __global__ fmha_reference_kernel(
         }
         continue;
       }
-  
+
       for (int idx_K = threadIdx.x; idx_K < size<1>(problem_shape); idx_K += blockDim.x) {
         ElementAccumulator acc = 0;
         for (int idx_D = 0; idx_D < head_qk; idx_D++) {
@@ -118,6 +118,9 @@ void __global__ fmha_reference_kernel(
           ElementAccumulator eK = mK(idx_K + offset_K, idx_D, idx_L);
           acc += eQ * eK;
         }
+
+        // Apply windowed causal mask: only allow attention within [idx_Q - window_size_left, idx_Q + window_size_right]
+
         auto frag = make_tensor<ElementAccumulator>(Shape<_1, _1>{});
         frag(0) = acc;
         mask.apply_mask(frag, make_tensor(id.data() + make_arithmetic_tuple(idx_Q, idx_K), id.layout()), problem_shape);
