@@ -229,22 +229,40 @@ struct CausalMask : NoMask {
 
   template<class BlkCoord, class TileShape, class ProblemSize>
   CUTLASS_DEVICE
-  int get_trip_count(
+  cute::tuple<int, int> get_n_block_min_max(
       BlkCoord const& blk_coord,
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
+
+    int n_block_min = 0;
+    int n_block_max;
 
     // See note below on different ways to think about causal attention
     // Again, we'd add the offset_q into the max_blocks_q calculation
     int max_blocks_k = Base::get_trip_count(blk_coord, tile_shape, problem_size);
     if constexpr (IsQBegin) {
       int max_blocks_q = ceil_div((get<0>(blk_coord) + 1) * get<0>(tile_shape), get<1>(tile_shape));
-      return std::min(max_blocks_k, max_blocks_q);
+      n_block_max = std::min(max_blocks_k, max_blocks_q);
     } else {
       const int offset_q = get<1>(problem_size) - get<0>(problem_size);
       int max_blocks_q = ceil_div((get<0>(blk_coord) + 1) * get<0>(tile_shape) + offset_q, get<1>(tile_shape));
-      return std::min(max_blocks_k, max_blocks_q);
+      n_block_max = std::min(max_blocks_k, max_blocks_q);
     }
+
+    return cute::make_tuple(n_block_min, n_block_max);
+  }
+
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_trip_count(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    auto min_max = get_n_block_min_max(blk_coord, tile_shape, problem_size);
+    int n_block_min = get<0>(min_max);
+    int n_block_max = get<1>(min_max);
+    return n_block_max - n_block_min;
   }
 
   template<class BlkCoord, class TileShape, class ProblemSize>
@@ -253,7 +271,7 @@ struct CausalMask : NoMask {
       BlkCoord const& blk_coord,
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
-        
+
     int trip_count = get_trip_count(blk_coord, tile_shape, problem_size);
     if constexpr (IsQBegin) {
       return std::min(trip_count, int(ceil_div(size<0>(tile_shape), size<1>(tile_shape))));
