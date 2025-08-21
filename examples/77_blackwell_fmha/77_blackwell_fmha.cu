@@ -935,7 +935,15 @@ struct FwdRunner {
       flops *= static_cast<double>(size<1>(problem_shape));
       flops *= static_cast<double>(size<3,1>(problem_shape));
     }
-    flops *= 4.0 * (std::is_same_v<ActiveMask, CausalMask<true>> || std::is_same_v<ActiveMask, CausalMask<false>> ? 0.5 : 1.0);
+    double flops_ratio = 1.0;
+    if (std::is_same_v<ActiveMask, CausalMask<true>> || std::is_same_v<ActiveMask, CausalMask<false>>) {
+      flops_ratio = 0.5;
+    }
+    if (std::is_same_v<ActiveMask, LocalMask<true>> || std::is_same_v<ActiveMask, LocalMask<false>>) {
+      flops_ratio = (options.window_size_left + 1 + options.window_size_right) / static_cast<double>(size<1>(problem_shape));
+      flops_ratio = std::min(flops_ratio, 1.0);
+    }
+    flops *= 4.0 * flops_ratio;
     flops *= static_cast<double>(size<2>(problem_shape));
     flops *= static_cast<double>(size<3,0>(problem_shape));
     double tflops_s = flops * 1e-12 /*tera*/ / (runtime_ms * 1e-3 /*ms*/);
