@@ -940,7 +940,21 @@ struct FwdRunner {
       flops_ratio = 0.5;
     }
     if (std::is_same_v<ActiveMask, LocalMask<true>> || std::is_same_v<ActiveMask, LocalMask<false>>) {
-      flops_ratio = (options.window_size_left + 1 + options.window_size_right) / static_cast<double>(size<1>(problem_shape));
+      // For regular sequences
+      int seqlen_q = size<0>(problem_shape);
+      int seqlen_k = size<1>(problem_shape);
+
+      double total_valid_pairs = 0.0;
+      for (int row_idx = 0; row_idx < seqlen_q; row_idx++) {
+        int col_left = std::max(row_idx - options.window_size_left, 0);
+        int col_right = std::min(row_idx + options.window_size_right, seqlen_k - 1);
+        // Valid positions in this row
+        if (col_right >= col_left) {
+          total_valid_pairs += (col_right - col_left + 1);
+        }
+      }
+      double total_positions = static_cast<double>(seqlen_q) * static_cast<double>(seqlen_k);
+      flops_ratio = (total_positions > 0) ? (total_valid_pairs / total_positions) : 1.0;
       flops_ratio = std::min(flops_ratio, 1.0);
     }
     flops *= 4.0 * flops_ratio;
