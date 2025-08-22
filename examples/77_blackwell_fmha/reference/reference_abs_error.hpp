@@ -106,7 +106,11 @@ __global__ void reference_abs_diff_kernel(
       }
 
       double diff = fabs(data[i] - data_ref[i]);
-      if (print_diff) if (not isfinite(diff) || diff > 0.01f) printf("difference at %lld: %f ... %f vs %f\n", static_cast<long long int>(i), diff, (double)data[i], (double)data_ref[i]);
+      if (print_diff) if (not isfinite(diff) || diff > 0.01f) {
+        int row = i / 128;
+        int col = i % 128;
+        printf("difference at (%d, %d): %f ... %f vs %f\n", row, col, diff, (double)data[i], (double)data_ref[i]);
+      }
       thread_max_diff = fmax(diff, thread_max_diff);
       thread_sum_diff += diff;
     }
@@ -202,7 +206,11 @@ __global__ void reference_rel_diff_kernel(
         continue;
       }
       double diff = fabs(data[i] - data_ref[i]) / fabs(data_ref[i]);
-      if (print_diff) if (not isfinite(diff) || diff > 0.01f) printf("difference at %lld: %f ... %f vs %f\n", static_cast<long long int>(i), diff, (double)data[i], (double)data_ref[i]);
+      if (print_diff) if (not isfinite(diff) || diff > 0.01f) {
+        int row = i / 128;
+        int col = i % 128;
+        printf("difference at (%d, %d): %f ... %f vs %f\n", row, col, diff, (double)data[i], (double)data_ref[i]);
+      }
       thread_max_diff = fmax(diff, thread_max_diff);
       thread_sum_diff += diff;
     }
