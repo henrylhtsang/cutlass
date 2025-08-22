@@ -87,6 +87,28 @@ struct NoMask {
     return get_trip_count(blk_coord, tile_shape, problem_size);
   }
 
+  // If we have separate iterations with causal or local masking at the start, where do we stop
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_n_block_min_causal_local_mask(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    return 0;
+  }
+
+  // If we have separate iterations with local masking at the end, where do we stop the non-masked iterations
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_n_block_min_before_local_mask(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    return get_unmasked_trip_count(blk_coord, tile_shape, problem_size);
+  }
+
   template<class AccQK, class IndexQK, class ProblemSize>
   CUTLASS_DEVICE
   void apply_mask(
@@ -140,6 +162,17 @@ struct ResidualMask : NoMask {
       return get_trip_count(blk_coord, tile_shape, problem_size) - 1;
     }
     return get_trip_count(blk_coord, tile_shape, problem_size);
+  }
+
+  // If we have separate iterations with local masking at the end, where do we stop the non-masked iterations
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_n_block_min_before_local_mask(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    return get_unmasked_trip_count(blk_coord, tile_shape, problem_size);
   }
 
   template<class AccQK, class IndexQK, class ProblemSize>
@@ -291,6 +324,17 @@ struct CausalMask : NoMask {
       ProblemSize const& problem_size) {
 
     return get_trip_count(blk_coord, tile_shape, problem_size) - get_masked_trip_count(blk_coord, tile_shape, problem_size);
+  }
+
+  // If we have separate iterations with local masking at the end, where do we stop the non-masked iterations
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_n_block_min_before_local_mask(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    return get_unmasked_trip_count(blk_coord, tile_shape, problem_size);
   }
 
   template<class AccQK, class IndexQK, class ProblemSize>
@@ -456,6 +500,34 @@ struct LocalMask : NoMask {
 
     // TODO: follow CausalMask to improve this
     return 0;
+  }
+
+  // If we have separate iterations with causal or local masking at the start, where do we stop
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_n_block_min_causal_local_mask(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    auto min_max = get_n_block_min_max(blk_coord, tile_shape, problem_size);
+    int n_block_min = get<0>(min_max);
+    return n_block_min;
+  }
+
+  // If we have separate iterations with local masking at the end, where do we stop the non-masked iterations
+  template<class BlkCoord, class TileShape, class ProblemSize>
+  CUTLASS_DEVICE
+  int get_n_block_min_before_local_mask(
+      BlkCoord const& blk_coord,
+      TileShape const& tile_shape,
+      ProblemSize const& problem_size) {
+
+    // TODO: implementation is too naive
+
+    auto min_max = get_n_block_min_max(blk_coord, tile_shape, problem_size);
+    int n_block_min = get<0>(min_max);
+    return n_block_min;
   }
 
   template<class AccQK, class IndexQK, class ProblemSize>
