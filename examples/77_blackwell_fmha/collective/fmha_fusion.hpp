@@ -485,10 +485,10 @@ struct LocalMask : NoMask {
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
 
-    // TODO: follow CausalMask to improve this
-
     int trip_count = get_trip_count(blk_coord, tile_shape, problem_size);
-    return trip_count;
+    int unmasked_trip_count = get_unmasked_trip_count(blk_coord, tile_shape, problem_size);
+
+    return trip_count - unmasked_trip_count;
   }
 
   template<class BlkCoord, class TileShape, class ProblemSize>
@@ -498,8 +498,10 @@ struct LocalMask : NoMask {
       TileShape const& tile_shape,
       ProblemSize const& problem_size) {
 
-    // TODO: follow CausalMask to improve this
-    return 0;
+    int mask_end = get_n_block_min_causal_local_mask(blk_coord, tile_shape, problem_size);
+    int mask_begin = get_n_block_min_before_local_mask(blk_coord, tile_shape, problem_size);
+
+    return mask_begin - mask_end;
   }
 
   // If we have separate iterations with causal or local masking at the start, where do we stop
