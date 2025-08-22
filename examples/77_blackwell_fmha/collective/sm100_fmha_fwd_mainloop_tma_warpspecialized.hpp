@@ -728,7 +728,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
       PipelineC& pipeline_c, typename PipelineC::PipelineState& pipeline_c_producer_state,
       OrderBarrierSoftmax& order_s) {
 
-    int mask_tile_count = Mask(params.window_size_left, params.window_size_right).get_unmasked_trip_count(blk_coord, TileShape{}, problem_shape);
+    int unmasked_tile_count = Mask(params.window_size_left, params.window_size_right).get_unmasked_trip_count(blk_coord, TileShape{}, problem_shape);
 
     auto min_max = Mask(params.window_size_left, params.window_size_right).get_n_block_min_max(blk_coord, TileShape{}, problem_shape);
     int n_block_min = get<0>(min_max);
@@ -747,10 +747,11 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     pipeline_c.producer_acquire(pipeline_c_producer_state);
 
     CUTLASS_PRAGMA_NO_UNROLL
-    for (; mask_tile_count > 0; mask_tile_count -= 1) {
+    for (; unmasked_tile_count > 0; unmasked_tile_count -= 1) {
       softmax_step<false /* need_apply_mask */>(
           row_max, row_sum, stage,
-          (mask_tile_count == 1) &&
+          (unmasked_tile_count == 1) &&
+          // why? because we need to make sure that the final step is the last one??????
               (Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape) == 0),
           blk_coord, cS, params, problem_shape,
           pipeline_s, pipeline_s_consumer_state,
@@ -762,12 +763,12 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     }
 
     // Masked iterations
-    mask_tile_count = Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape);
+    int masked_tile_count = Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape);
 
     CUTLASS_PRAGMA_NO_UNROLL
-    for (; mask_tile_count > 0; mask_tile_count -= 1) {
+    for (; masked_tile_count > 0; masked_tile_count -= 1) {
       softmax_step<true /* need_apply_mask */>(
-          row_max, row_sum, stage, mask_tile_count == 1,
+          row_max, row_sum, stage, masked_tile_count == 1,
           blk_coord, cS, params, problem_shape,
           pipeline_s, pipeline_s_consumer_state,
           pipeline_c, pipeline_c_producer_state,
