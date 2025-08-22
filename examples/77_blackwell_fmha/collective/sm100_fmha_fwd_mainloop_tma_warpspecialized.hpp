@@ -728,31 +728,50 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
       PipelineC& pipeline_c, typename PipelineC::PipelineState& pipeline_c_producer_state,
       OrderBarrierSoftmax& order_s) {
 
-    int unmasked_tile_count = Mask(params.window_size_left, params.window_size_right).get_unmasked_trip_count(blk_coord, TileShape{}, problem_shape);
 
     auto min_max = Mask(params.window_size_left, params.window_size_right).get_n_block_min_max(blk_coord, TileShape{}, problem_shape);
     int n_block_min = get<0>(min_max);
-    // int n_block_max = get<1>(min_max);
+    int n_block_max = get<1>(min_max);
+
+    // int trip_count = n_block_max - n_block_min;
 
     ElementQK row_max = -INFINITY;
     ElementQK row_sum = 0;
 
     Tensor cS_base = make_identity_tensor(select<0,1>(TileShapeQK{}));
     auto logical_offset = make_coord(
-        get<0>(blk_coord) * get<0>(TileShape{}) + (stage % get<0>(ThreadShape{})) * get<0>(TileShapeQK{}),
-        0 + (stage % get<1>(ThreadShape{})) * get<1>(TileShapeQK{}) + n_block_min * get<1>(TileShape{})
+      get<0>(blk_coord) * get<0>(TileShape{}) + (stage % get<0>(ThreadShape{})) * get<0>(TileShapeQK{}),
+      0 + (stage % get<1>(ThreadShape{})) * get<1>(TileShapeQK{}) + n_block_min * get<1>(TileShape{})
     );
     Tensor cS = domain_offset(logical_offset, cS_base);
 
     pipeline_c.producer_acquire(pipeline_c_producer_state);
 
+    int masked_tile_count = Mask(params.window_size_left, params.window_size_right).get_n_block_min_causal_local_mask(blk_coord, TileShape{}, problem_shape);
+    masked_tile_count = masked_tile_count - n_block_min;
+    CUTLASS_PRAGMA_NO_UNROLL
+    for (; masked_tile_count > 0; masked_tile_count -= 1) {
+      softmax_step<true /* need_apply_mask */>(
+          row_max, row_sum, stage,
+          // never have final call in this loop
+          false /* final_call */,
+          blk_coord, cS, params, problem_shape,
+          pipeline_s, pipeline_s_consumer_state,
+          pipeline_c, pipeline_c_producer_state,
+          order_s
+      );
+
+      cS.data() = cS.data() + E<1>{} * get<1>(ThreadShape{}) * get<1>(TileShapeQK{});
+    }
+
+    int unmasked_tile_count = Mask(params.window_size_left, params.window_size_right).get_unmasked_trip_count(blk_coord, TileShape{}, problem_shape);
     CUTLASS_PRAGMA_NO_UNROLL
     for (; unmasked_tile_count > 0; unmasked_tile_count -= 1) {
       softmax_step<false /* need_apply_mask */>(
           row_max, row_sum, stage,
           (unmasked_tile_count == 1) &&
           // why? because we need to make sure that the final step is the last one??????
-              (Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape) == 0),
+              (Mask(params.window_size_left, params.window_size_right).get_n_block_min_before_local_mask(blk_coord, TileShape{}, problem_shape) == n_block_max),
           blk_coord, cS, params, problem_shape,
           pipeline_s, pipeline_s_consumer_state,
           pipeline_c, pipeline_c_producer_state,
@@ -763,7 +782,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     }
 
     // Masked iterations
-    int masked_tile_count = Mask(params.window_size_left, params.window_size_right).get_masked_trip_count(blk_coord, TileShape{}, problem_shape);
+    masked_tile_count = n_block_max - Mask(params.window_size_left, params.window_size_right).get_n_block_min_before_local_mask(blk_coord, TileShape{}, problem_shape);
 
     CUTLASS_PRAGMA_NO_UNROLL
     for (; masked_tile_count > 0; masked_tile_count -= 1) {
