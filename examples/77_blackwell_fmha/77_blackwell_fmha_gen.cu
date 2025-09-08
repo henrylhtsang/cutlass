@@ -102,6 +102,10 @@ struct Options {
   bool varlen = false;
   bool cache_only = false;
 
+  int window_size_left = -1;
+  int window_size_right = -1;
+  bool local = false;
+
   int sm_count = 0;
 
   std::string kernel_filter;
@@ -339,7 +343,7 @@ struct ExampleRunner {
   using StrideCacheV = StrideCacheK;
   using StrideO = StrideQ;
 
-  using Kernel = 
+  using Kernel =
     cutlass::fmha::kernel::Sm100FmhaGenKernelWarpspecialized<
       ProblemShape,
       cutlass::fmha::collective::Sm100FmhaGenMainloopWarpspecialized<
@@ -354,7 +358,7 @@ struct ExampleRunner {
         cutlass::fmha::kernel::IndividualTileScheduler
       >
     >;
-  
+
   using Operation = cutlass::fmha::device::FMHA<Kernel>;
 
   StrideQ stride_q;
@@ -410,21 +414,21 @@ struct ExampleRunner {
     reference_abs_diff(block_o, block_ref_o, max_diff, mean_diff);
     bool passed_O = (max_diff < kMaxDiffThresh) && (mean_diff < kMeanDiffThresh);
     if (! passed_O) {
-      std::cerr << "failed O: max diff " << max_diff 
+      std::cerr << "failed O: max diff " << max_diff
                 << " mean " << mean_diff << std::endl;
     }
 
     reference_abs_diff(block_cache_k, block_ref_cache_k, max_diff, mean_diff);
     bool passed_K = (max_diff < kMaxDiffThresh) && (mean_diff < kMeanDiffThresh);
     if ( ! passed_K) {
-      std::cerr << "failed Cache K: max diff " << max_diff 
+      std::cerr << "failed Cache K: max diff " << max_diff
                 << " mean " << mean_diff << std::endl;
     }
 
     reference_abs_diff(block_cache_v, block_ref_cache_v, max_diff, mean_diff);
     bool passed_V = (max_diff < kMaxDiffThresh) && (mean_diff < kMeanDiffThresh);
     if ( ! passed_V) {
-      std::cerr << "failed Cache V: max diff " << max_diff 
+      std::cerr << "failed Cache V: max diff " << max_diff
                 << " mean " << mean_diff << std::endl;
     }
 
@@ -491,7 +495,7 @@ struct ExampleRunner {
     block_ref_cache_k.reset(options.b * get<2,1>(stride_cache_k));
     block_ref_cache_v.reset(options.b * get<2,1>(stride_cache_v));
     block_ref_o.reset(options.b * get<2,1>(stride_o));
-    
+
     initialize_block(block_q, seed + 2023, options.init_style_q);
     if (! options.cache_only) {
       initialize_block(block_new_k, seed + 2022, options.init_style_new_k);
@@ -614,7 +618,7 @@ struct ExampleRunner {
       //
       // Stop profiling loop
       //
-  
+
       // Wait for work on the device to complete.
       result = cudaEventSynchronize(events[1]);
       if (result != cudaSuccess) {
@@ -670,7 +674,7 @@ struct ExampleRunner {
       passed = verify(problem_shape);
       if (passed) example_result.verified = true;
     }
-    
+
     if (!passed) {
       std::cerr << "Reference check failed" << std::endl;
       return example_result;

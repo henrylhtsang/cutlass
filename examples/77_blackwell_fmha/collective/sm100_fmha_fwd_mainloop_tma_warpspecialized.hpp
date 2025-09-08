@@ -771,7 +771,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
           row_max, row_sum, stage,
           (unmasked_tile_count == 1) &&
           // why? because we need to make sure that the final step is the last one??????
-              (Mask(params.window_size_left, params.window_size_right).get_n_block_min_before_local_mask(blk_coord, TileShape{}, problem_shape) == n_block_max),
+              (Mask(params.window_size_left, params.window_size_right).get_n_block_unmask_max(blk_coord, TileShape{}, problem_shape) == n_block_max),
           blk_coord, cS, params, problem_shape,
           pipeline_s, pipeline_s_consumer_state,
           pipeline_c, pipeline_c_producer_state,
@@ -782,7 +782,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     }
 
     // Masked iterations
-    masked_tile_count = n_block_max - Mask(params.window_size_left, params.window_size_right).get_n_block_min_before_local_mask(blk_coord, TileShape{}, problem_shape);
+    masked_tile_count = n_block_max - Mask(params.window_size_left, params.window_size_right).get_n_block_unmask_max(blk_coord, TileShape{}, problem_shape);
 
     CUTLASS_PRAGMA_NO_UNROLL
     for (; masked_tile_count > 0; masked_tile_count -= 1) {
