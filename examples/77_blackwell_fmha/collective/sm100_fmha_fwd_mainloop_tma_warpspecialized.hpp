@@ -782,7 +782,7 @@ struct Sm100FmhaFwdMainloopTmaWarpspecialized {
     }
 
     // Masked iterations
-    masked_tile_count = n_block_max - Mask(params.window_size_left, params.window_size_right).get_n_block_unmask_max(blk_coord, TileShape{}, problem_shape);
+    // masked_tile_count = n_block_max - Mask(params.window_size_left, params.window_size_right).get_n_block_unmask_max(blk_coord, TileShape{}, problem_shape);
 
     CUTLASS_PRAGMA_NO_UNROLL
     for (; masked_tile_count > 0; masked_tile_count -= 1) {
