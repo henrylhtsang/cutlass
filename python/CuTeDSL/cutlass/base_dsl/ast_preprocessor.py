@@ -1634,9 +1634,22 @@ class DSLPreprocessor(ast.NodeTransformer):
         """
         self.generic_visit(node)
         # Emit
-        # node if type(pred) == bool else select_(pred, body, orelse)
+        # node if type(pred) == bool else select_(pred, lambda: body, lambda: orelse)
         # so if pred is a python bool, use python to short-circuit and avoid emit arith.select
+        # We wrap body and orelse in lambdas to avoid evaluating both branches eagerly
         self.import_top_module = True
+
+        # Create lambda wrappers for lazy evaluation
+        empty_args = ast.arguments(
+            posonlyargs=[],
+            args=[],
+            kwonlyargs=[],
+            kw_defaults=[],
+            defaults=[],
+        )
+        body_lambda = ast.Lambda(args=empty_args, body=node.body)
+        orelse_lambda = ast.Lambda(args=empty_args, body=node.orelse)
+
         return ast.copy_location(
             ast.IfExp(
                 test=ast.Compare(
@@ -1655,8 +1668,8 @@ class DSLPreprocessor(ast.NodeTransformer):
                     ),
                     args=[
                         node.test,
-                        node.body,
-                        node.orelse,
+                        body_lambda,
+                        orelse_lambda,
                     ],
                     keywords=[],
                 ),
